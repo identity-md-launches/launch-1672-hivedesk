@@ -15,8 +15,8 @@ Token: **HiveDesk (HVD)**, 18 decimals, 1,000,000,000 fixed supply.
 | `src/StrategyRegistry.sol` | Append-only log of proposed strategies. |
 | `src/BenchmarkTracker.sol` | Defines and records the three benchmarks per epoch. |
 | `src/PerformanceOracle.sol` | Panel-signed, write-once NAV publications per epoch. |
-| `src/DeploymentConfig.sol` | Every fixed parameter, as compile-time constants. |
-| `script/Deploy.s.sol` | Reviewable deployment order; `deploy()` is what the tests call. |
+| `src/DeploymentConfig.sol` | Every fixed parameter, as compile-time constants, including the four requester-held mainnet addresses. |
+| `script/Deploy.s.sol` | Reviewable deployment order; `deploy()` is what the tests call, `mainnetInputs()` is the launch's argument set. |
 | `test/` | Unit, fuzz and mainnet-fork tests. |
 | `site/` | Static IPFS site that reads the live contracts. |
 | `lib/forge-std` | forge-std v1.9.6, vendored as plain files. |
@@ -30,11 +30,14 @@ forge fmt --check
 forge test --fork-url <mainnet rpc>   # also runs test/fork, against the live Chainlink feeds
 ```
 
-Compiler pinned to `solc = "0.8.26"`, `bytecode_hash = "none"`, optimizer on. The fuzz suite was run with
-`FOUNDRY_FUZZ_SEED=0x46a109ffdb76ad5fcc28d2e9399e990aa419dd3e326df5e41a04f43dbd846e3c`. Tests read no
-environment variables; the fork tests skip themselves unless the chain id is 1 and the feeds have code.
+Compiler pinned to `solc = "0.8.26"`, `bytecode_hash = "none"`, optimizer on. The fuzz suite was last run
+with `FOUNDRY_FUZZ_SEED=0x50fa94088a5f2ad1ce08d9872999003bf12a615de98326517dbe25bacb80b920`. Neither the
+tests nor the deploy script read environment variables; the fork tests skip themselves unless the chain id
+is 1 and the feeds have code.
 
-Latest local results: 76 tests, all passing (fork suite: 3 passing against mainnet).
+Latest local results (2026-10-14, offline): 94 tests passing, 1 skipped (the fork suite, which passed 3/3
+against mainnet in the first job). `test/LaunchInputs.t.sol` adds 19 tests around the four mainnet
+addresses supplied in the follow-up brief.
 
 ## Design
 
@@ -44,7 +47,8 @@ No deployed contract has an owner, an `onlyOwner` function, a pause switch or an
 parameter is either an immutable set in the constructor or a constant in `DeploymentConfig`. The "Owner"
 of the launch (0x612a9bb008e16ef2d24f41dae9fc661831d93367) is the deployer of record only and holds no
 power over any contract. The two operational roles the brief defines, the strategy wallet and the oracle
-panel, are fixed at deployment and cannot be changed.
+panel, are fixed at deployment and cannot be changed. Their mainnet addresses were supplied by the requester
+in the follow-up brief and are listed under "Launch inputs" below.
 
 ### LaunchToken (HVD)
 
@@ -135,21 +139,39 @@ contract or needs code at an address; references are checked on first use.
 |---|---|---|
 | 0 | `LaunchToken` | none |
 | 1 | `StrategyRegistry` | none |
-| 2 | `DeskVault` | `strategyWallet` (requester-held), `registry` = `$contract:StrategyRegistry` |
+| 2 | `DeskVault` | `strategyWallet` = `STRATEGY_WALLET`, `registry` = `$contract:StrategyRegistry` |
 | 3 | `BenchmarkTracker` | `btcFeed` = `BTC_USD_FEED`, `equityFeed` = `EQUITY_USD_FEED` |
-| 4 | `PerformanceOracle` | `signer1`, `signer2`, `signer3` (requester-held, distinct, non-zero) |
+| 4 | `PerformanceOracle` | `signer1` = `ORACLE_SIGNER_1`, `signer2` = `ORACLE_SIGNER_2`, `signer3` = `ORACLE_SIGNER_3` |
 
-Two inputs are values only the requester holds and the brief does not give. Because the brief forbids
-owner roles and setters, they cannot be configured after launch and must be supplied as constructor
-arguments to the manifest step:
+The four requester-held values, which the first job had to stop and ask for, were supplied in the follow-up
+brief of 2026-10-14. Because the brief forbids owner roles and setters they are immutable constructor
+arguments, recorded as constants in `DeploymentConfig` so the script, the tests and the manifest step all
+use the same values:
 
-- **Strategy wallet**: the swarm's execution wallet, the only account that can move vault funds to trade.
-  Not the paying wallet; the brief says the paying wallet must retain no power.
-- **Oracle panel signers (3)**: the swarm oracle panel's signing keys.
+| Constant | Role | Ethereum mainnet address |
+|---|---|---|
+| `STRATEGY_WALLET` | The swarm's execution wallet: the only account that can call `allocate` and `returnCapital` on `DeskVault`. | `0xAF5a05077Da3e3D130d66C1C73362306cc89d899` |
+| `ORACLE_SIGNER_1` | Swarm oracle panel member. | `0xC4F6e66C24fDc6Ae0f859c468dd177f8100b4959` |
+| `ORACLE_SIGNER_2` | Swarm oracle panel member. | `0xc9b5c6b29F66D526b76e68198F70d66342b0d84c` |
+| `ORACLE_SIGNER_3` | Swarm oracle panel member. | `0xFc5c95f0c55815fB7cC4793CC2aDF6D4452221FC` |
 
-No placeholder, zero address or test key is baked in anywhere; the tests use locally generated addresses.
-`script/Deploy.s.sol` reads these from `HIVEDESK_STRATEGY_WALLET` and `HIVEDESK_ORACLE_SIGNER_{1,2,3}`
-only in `run()`; the launch itself is performed by IMD's factory from the built bytecode.
+What was checked about them on 2026-10-14, and why it matters:
+
+- All four are valid EIP-55 checksums (the compiler refuses a mis-cased literal), non-zero, and pairwise
+  distinct. The strategy wallet is not a panel member, so no single key can both trade and attest. Neither
+  the paying wallet nor IMD's factory is any of them.
+- All four have no code and nonce 0 on mainnet (queried over a public RPC). The panel members must be
+  externally owned accounts because `PerformanceOracle` verifies signatures with `ecrecover`; a smart
+  wallet could never attest. The strategy wallet receives allocations through a plain ETH `call`, which an
+  EOA always accepts. If the requester later wraps the strategy wallet in a contract, that contract must
+  accept ETH and be able to call `returnCapital{value: …}`.
+- No placeholder, zero address or test key is baked in anywhere. `test/LaunchInputs.t.sol` repeats the
+  literal values from the brief and fails if the constants ever drift from them.
+
+`script/Deploy.s.sol` no longer reads anything from the environment: `mainnetInputs()` returns these
+constants plus the two Chainlink feeds, `run()` refuses any chain id other than 1 and forwards them, and the
+tests call `deploy(mainnetInputs())` directly. The launch itself is performed by IMD's factory from the built
+bytecode with the arguments in the table above.
 
 ## What the brief asked that this does not do
 
@@ -163,14 +185,21 @@ only in `run()`; the launch itself is performed by IMD's factory from the built 
 
 ## Operational responsibilities
 
-- **Strategy wallet** (the swarm): proposes each decision in `StrategyRegistry` before trading, calls
-  `allocate` against that id, trades off-vault, and returns the full proceeds with `returnCapital`. It
-  must never send plain ETH to the vault (refused) and must settle every open trade; an unsettled trade
+- **Strategy wallet** `0xAF5a05077Da3e3D130d66C1C73362306cc89d899` (the swarm): proposes each decision in
+  `StrategyRegistry` from this address before trading (the vault refuses ids proposed by anyone else),
+  calls `allocate` against that id, trades off-vault, and returns the full proceeds with `returnCapital`.
+  It must never send plain ETH to the vault (refused) and must settle every open trade; an unsettled trade
   keeps capital counted at cost in NAV. It is trusted with up to 80% of total assets: this is the desk's
-  core trust assumption and is stated to depositors.
-- **Oracle panel**: at each epoch end, computes desk NAV per share (`navPerShare()`), the three benchmark
-  NAVs (from `BenchmarkTracker` snapshots) and the report hash, signs the EIP-712 report, and anyone
-  submits it. A publication is final.
+  core trust assumption and is stated to depositors. Its key must be kept funded for gas and guarded: it
+  cannot be rotated, so a compromise can only be answered by depositors withdrawing the idle 20% and by
+  the swarm halting deposits off-chain.
+- **Oracle panel** `0xC4F6…4959`, `0xc9b5…d84c`, `0xFc5c…21FC`: at each epoch end, computes desk NAV per
+  share (`navPerShare()`), the three benchmark NAVs (from `BenchmarkTracker` snapshots) and the report
+  hash; at least two of the three sign the EIP-712 report (chain id 1, the oracle's address, `Report`
+  typehash as in the contract) and anyone submits it with the signatures in ascending signer-address order.
+  A publication is final. Keys cannot be rotated: if one key is lost the remaining two still reach
+  quorum; if two are lost or compromised the oracle is dead or untrustworthy and only a redeployment of
+  `PerformanceOracle` (a new address, not a change to the token) can replace it.
 - **Snapshotter** (anyone, typically a swarm agent): calls `BenchmarkTracker.snapshot()` in the 200-block
   window after each epoch starts. Missed windows are gaps.
 - **Site maintainer**: fills `site/config.js` with the deployed addresses (or passes them as URL
@@ -181,6 +210,9 @@ only in `run()`; the launch itself is performed by IMD's factory from the built 
 - Depositors trust the strategy wallet with the allocated capital. The 80% cap and permissionless
   withdrawal of idle ETH are the only protections; a dishonest or compromised strategy wallet can lose
   what it holds. There is deliberately no admin that could stop it, by the brief's rules.
+- The four requester-held addresses are taken from the brief as given. Nothing here can verify who
+  controls them; the requester is responsible for holding those keys, and the tests only show that the
+  contracts grant power to exactly those addresses and to no other.
 - NAV while a trade is open counts capital at cost. Depositors and withdrawers during an open trade
   transact at that NAV; the realised result is applied on settlement.
 - Benchmark prices come from Chainlink with staleness and sign checks; the coin flip uses a blockhash,

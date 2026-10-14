@@ -10,8 +10,9 @@ import {PerformanceOracle} from "../src/PerformanceOracle.sol";
 import {DeploymentConfig} from "../src/DeploymentConfig.sol";
 
 /// @notice Reviewable deployment logic. `deploy` takes every input as an argument and is what the tests
-/// call; `run` only reads the requester-held inputs from the environment and forwards them. The launch
-/// itself is performed by IMD's factory from the built bytecode in the order below, not by this script.
+/// call; `mainnetInputs` is the exact set of constructor arguments the mainnet launch uses, all from
+/// `DeploymentConfig`; `run` forwards them under a broadcast and reads nothing from the environment. The
+/// launch itself is performed by IMD's factory from the built bytecode in the order below, not by this script.
 contract Deploy is Script {
     struct Inputs {
         address strategyWallet;
@@ -39,18 +40,24 @@ contract Deploy is Script {
         d.oracle = new PerformanceOracle(inputs.signer1, inputs.signer2, inputs.signer3);
     }
 
-    /// @notice Mainnet defaults for the public feeds; the requester-held addresses come from the environment.
-    function run() external returns (Deployment memory d) {
-        Inputs memory inputs = Inputs({
-            strategyWallet: vm.envAddress("HIVEDESK_STRATEGY_WALLET"),
-            signer1: vm.envAddress("HIVEDESK_ORACLE_SIGNER_1"),
-            signer2: vm.envAddress("HIVEDESK_ORACLE_SIGNER_2"),
-            signer3: vm.envAddress("HIVEDESK_ORACLE_SIGNER_3"),
+    /// @notice The constructor arguments of the Ethereum mainnet launch: the requester-held strategy wallet
+    /// and oracle panel plus the public Chainlink feeds, every one a constant in `DeploymentConfig`.
+    function mainnetInputs() public pure returns (Inputs memory) {
+        return Inputs({
+            strategyWallet: DeploymentConfig.STRATEGY_WALLET,
+            signer1: DeploymentConfig.ORACLE_SIGNER_1,
+            signer2: DeploymentConfig.ORACLE_SIGNER_2,
+            signer3: DeploymentConfig.ORACLE_SIGNER_3,
             btcFeed: DeploymentConfig.BTC_USD_FEED,
             equityFeed: DeploymentConfig.EQUITY_USD_FEED
         });
+    }
+
+    /// @notice Deploys the mainnet configuration. Reads no environment variables; refuses any other chain.
+    function run() external returns (Deployment memory d) {
+        require(block.chainid == DeploymentConfig.CHAIN_ID, "Deploy: mainnet only");
         vm.startBroadcast();
-        d = deploy(inputs);
+        d = deploy(mainnetInputs());
         vm.stopBroadcast();
     }
 }

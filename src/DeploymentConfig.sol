@@ -3,14 +3,33 @@ pragma solidity 0.8.26;
 
 /// @title HiveDesk deployment configuration
 /// @notice Every fixed parameter of the desk lives here as a compile-time constant. Nothing in this file can
-/// be changed after deployment because no contract has an owner or a setter. Values that only the requester
-/// holds (the strategy wallet and the oracle panel signers) are not here: they are constructor arguments,
-/// listed in the README under "Launch inputs".
+/// be changed after deployment because no contract has an owner or a setter. The requester-held values (the
+/// strategy wallet and the oracle panel signers) are recorded here too: the contracts still take them as
+/// constructor arguments, and these constants are the values the mainnet launch supplies. They are listed
+/// in the README under "Launch inputs".
 /// @dev All functions of this library are internal constants, so the compiler inlines them and no link
 /// placeholder is left in any bytecode.
 library DeploymentConfig {
     /// @notice The launch chain. Mainnet only.
     uint256 internal constant CHAIN_ID = 1;
+
+    // ------------------------------------------------------------------------------------------------
+    // Launch inputs held by the requester (Ethereum mainnet), given in the follow-up brief of 2026-10-14
+    // ------------------------------------------------------------------------------------------------
+
+    /// @notice The swarm's execution wallet: the only account that can move DeskVault funds out to trade
+    /// and settle them. Constructor argument of DeskVault. Checked 2026-10-14: no code, nonce 0 (an EOA).
+    address internal constant STRATEGY_WALLET = 0xAF5a05077Da3e3D130d66C1C73362306cc89d899;
+
+    /// @notice Swarm oracle panel member 1. Constructor argument of PerformanceOracle. Must be an EOA
+    /// because the oracle verifies panel signatures with ecrecover. Checked 2026-10-14: no code.
+    address internal constant ORACLE_SIGNER_1 = 0xC4F6e66C24fDc6Ae0f859c468dd177f8100b4959;
+
+    /// @notice Swarm oracle panel member 2. Checked 2026-10-14: no code.
+    address internal constant ORACLE_SIGNER_2 = 0xc9b5c6b29F66D526b76e68198F70d66342b0d84c;
+
+    /// @notice Swarm oracle panel member 3. Checked 2026-10-14: no code.
+    address internal constant ORACLE_SIGNER_3 = 0xFc5c95f0c55815fB7cC4793CC2aDF6D4452221FC;
 
     /// @notice 1e18 fixed point used for every NAV figure.
     uint256 internal constant WAD = 1e18;
