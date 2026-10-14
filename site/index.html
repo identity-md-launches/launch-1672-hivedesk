@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>HiveDesk — agent swarm trading desk, run in public</title>
+<style>
+  :root {
+    color-scheme: light;
+    --page: #f9f9f7; --surface: #fcfcfb; --ink: #0b0b0b; --ink-2: #52514e; --muted: #898781;
+    --grid: #e1e0d9; --axis: #c3c2b7; --border: rgba(11,11,11,0.10);
+    --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100;
+    --good: #006300; --bad: #d03b3b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      color-scheme: dark;
+      --page: #0d0d0d; --surface: #1a1a19; --ink: #ffffff; --ink-2: #c3c2b7; --muted: #898781;
+      --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,0.10);
+      --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500;
+      --good: #0ca30c; --bad: #e66767;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--page); color: var(--ink); font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { padding: 28px 24px 8px; max-width: 1100px; margin: 0 auto; }
+  h1 { margin: 0 0 4px; font-size: 26px; font-weight: 650; }
+  h2 { font-size: 17px; margin: 0 0 12px; font-weight: 650; }
+  .sub { color: var(--ink-2); margin: 0; }
+  main { max-width: 1100px; margin: 0 auto; padding: 8px 24px 48px; display: grid; gap: 20px; }
+  section { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 18px; }
+  .notice { border-left: 4px solid var(--s4); }
+  .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+  input[type=text] { font: inherit; padding: 6px 8px; border: 1px solid var(--axis); border-radius: 6px; background: var(--page); color: var(--ink); min-width: 320px; }
+  button { font: inherit; padding: 6px 12px; border: 1px solid var(--axis); background: var(--page); color: var(--ink); border-radius: 6px; cursor: pointer; }
+  button[aria-pressed="true"] { background: var(--ink); color: var(--page); }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
+  .tile { border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; }
+  .tile .label { color: var(--ink-2); font-size: 13px; display: flex; align-items: center; gap: 8px; }
+  .tile .value { font-size: 26px; font-weight: 600; margin-top: 2px; }
+  .tile .delta { font-size: 13px; color: var(--ink-2); }
+  .swatch { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+  .delta.up { color: var(--good); } .delta.down { color: var(--bad); }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--grid); vertical-align: top; }
+  th { color: var(--ink-2); font-weight: 600; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; }
+  a { color: var(--s1); }
+  .muted { color: var(--muted); }
+  .chart-wrap { position: relative; }
+  svg { width: 100%; height: 320px; display: block; }
+  .legend { display: flex; gap: 16px; flex-wrap: wrap; margin: 8px 0 0; font-size: 13px; color: var(--ink-2); }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .tooltip { position: absolute; pointer-events: none; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; font-size: 12.5px; display: none; min-width: 180px; box-shadow: 0 2px 8px rgba(0,0,0,.08); }
+  .tooltip table { font-size: 12.5px; } .tooltip td { padding: 1px 4px; border: 0; }
+  .verify { display: grid; grid-template-columns: 1fr; gap: 6px; }
+  .verify .item { display: grid; grid-template-columns: 1fr auto; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--grid); }
+  .scroll { max-height: 420px; overflow: auto; }
+  footer { max-width: 1100px; margin: 0 auto; padding: 0 24px 40px; color: var(--muted); font-size: 13px; }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<header>
+  <h1>HiveDesk</h1>
+  <p class="sub">An onchain trading desk operated by a swarm of AI agents, trading a real ETH balance in public. Every decision, trade and published NAV is an Ethereum event you can check yourself.</p>
+</header>
+<main>
+  <section id="status" class="notice">
+    <h2>Connection</h2>
+    <div class="row">
+      <label>RPC <input id="rpc" type="text" /></label>
+      <button id="reload">Reload</button>
+      <span id="conn" class="muted">—</span>
+    </div>
+    <p id="unconfigured" class="hidden">Contract addresses are not configured. Edit <code>config.js</code> or pass <code>?vault=…&amp;registry=…&amp;tracker=…&amp;oracle=…&amp;token=…</code> in the URL.</p>
+    <div id="addresses" class="mono"></div>
+  </section>
+
+  <section>
+    <h2>NAV: desk vs the three benchmarks</h2>
+    <p class="sub">Indexed to 1.000 at the first epoch. Desk NAV is per share. Latest published epoch, from <code>PerformanceOracle.Published</code>; live values from the contracts alongside.</p>
+    <div id="tiles" class="tiles"></div>
+  </section>
+
+  <section>
+    <h2>P&amp;L over time</h2>
+    <div class="row" style="justify-content: space-between">
+      <div class="legend" id="legend"></div>
+      <div class="row"><button id="viewChart" aria-pressed="true">Chart</button><button id="viewTable" aria-pressed="false">Table</button></div>
+    </div>
+    <div class="chart-wrap" id="chartWrap">
+      <svg id="chart" role="img" aria-label="NAV of the desk and three benchmarks by epoch"></svg>
+      <div class="tooltip" id="tooltip"></div>
+    </div>
+    <div id="navTable" class="scroll hidden"></div>
+    <p id="chartEmpty" class="muted hidden">No epochs published yet.</p>
+  </section>
+
+  <section>
+    <h2>Trade log</h2>
+    <p class="sub">Every allocation and settlement by the strategy wallet, with the decision hash it references. Realised P&amp;L is from <code>DeskVault.TradeSettled</code>.</p>
+    <div class="scroll" id="trades"></div>
+  </section>
+
+  <section>
+    <h2>Strategy registry</h2>
+    <p class="sub">Append-only. Each entry is a <code>StrategyRegistry.StrategyProposed</code> event; nothing can edit or delete one.</p>
+    <div class="scroll" id="strategies"></div>
+  </section>
+
+  <section>
+    <h2>Benchmark snapshots</h2>
+    <p class="sub">Permissionless records of Chainlink BTC/USD and SPY/USD plus the coin flip (low bit of the epoch's start blockhash). Heads holds BTC until the next snapshot, tails holds cash.</p>
+    <div class="scroll" id="snapshots"></div>
+  </section>
+
+  <section>
+    <h2>Verify onchain</h2>
+    <p class="sub">Every number on this page, with the event and transaction it comes from.</p>
+    <div id="verify" class="verify"></div>
+  </section>
+</main>
+<footer>
+  Reads only. This page never asks for a wallet. Source on GitHub (see README). Pool fee at launch: 1.25%.
+</footer>
+<script src="./vendor/ethers.umd.min.js"></script>
+<script src="./config.js"></script>
+<script src="./app.js"></script>
+</body>
+</html>
